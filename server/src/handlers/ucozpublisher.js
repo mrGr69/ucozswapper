@@ -155,17 +155,25 @@ async function waitForPublishedUrl(publishedUrl) {
       });
       lastStatus = response.status;
       await response.body?.cancel().catch(() => {});
-      if (response.ok) return;
+      if (response.ok) {
+        return {
+          status: "ready",
+          httpStatus: response.status,
+          attempts: attempt + 1
+        };
+      }
       lastError = null;
     } catch (error) {
       lastError = error;
     }
   }
 
-  if (lastStatus) {
-    throw new Error(`Лендинг записан по FTP, но публичный URL вернул HTTP ${lastStatus} после ожидания публикации.`);
-  }
-  throw new Error(`Лендинг записан по FTP, но проверка публичного URL не завершилась: ${lastError?.message || "неизвестная ошибка"}.`);
+  return {
+    status: "pending",
+    httpStatus: lastStatus,
+    attempts: publicationVerificationDelays.length,
+    error: lastError?.message || null
+  };
 }
 
 function assertToolSuccess(result, fallbackMessage) {
@@ -234,7 +242,7 @@ export async function publishLandingToUcoz({ product, content, html }) {
     }), "uCoz FTP не смог записать лендинг.");
     const publishedUrl = `${normalizeSiteUrl()}${remotePath}`;
 
-    await waitForPublishedUrl(publishedUrl);
+    const verification = await waitForPublishedUrl(publishedUrl);
 
     return {
       published: true,
@@ -242,8 +250,12 @@ export async function publishLandingToUcoz({ product, content, html }) {
       pageId: null,
       slug,
       url: publishedUrl,
+      remotePath,
       mode: "ftp",
       provider: "ucoz-mcp/ftp",
+      verificationStatus: verification.status,
+      verificationHttpStatus: verification.httpStatus,
+      verificationAttempts: verification.attempts,
       transportResult: readToolText(result)
     };
   }

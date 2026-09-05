@@ -2,6 +2,29 @@ import { Check, ChevronLeft, ChevronRight, ExternalLink, Sparkles } from "lucide
 import { useEffect, useState } from "react";
 import "./landing-preview.css";
 
+function splitDescription(value) {
+  const text = String(value || "").replace(/\r/g, "").trim();
+  if (!text) return [];
+
+  const explicit = text
+    .split(/\n\s*\n+/)
+    .map((item) => item.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  if (explicit.length > 1) return explicit.slice(0, 8);
+
+  const sentences = (explicit[0] || text)
+    .split(/(?<=[.!?])\s+(?=[А-ЯA-ZА-ЯЁ0-9«])/u)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
+  if (sentences.length < 4) return [explicit[0] || text];
+
+  const paragraphs = [];
+  for (let index = 0; index < sentences.length; index += 3) {
+    paragraphs.push(sentences.slice(index, index + 3).join(" "));
+  }
+  return paragraphs.slice(0, 8);
+}
+
 export default function LandingPreview({ product, content, warnings, publication, publishMessage }) {
   const images = product.images || [];
   const initialImage = content.hero?.image || images[0];
@@ -9,6 +32,7 @@ export default function LandingPreview({ product, content, warnings, publication
   const preset = content.design?.preset || "spotlight";
   const slider = content.design?.slider || "rail";
   const image = images[activeIndex] || initialImage;
+  const description = splitDescription(product.description);
 
   useEffect(() => {
     setActiveIndex(Math.max(0, images.indexOf(initialImage)));
@@ -74,6 +98,17 @@ export default function LandingPreview({ product, content, warnings, publication
             </ul>
           </section>
 
+          {description.length > 0 && (
+            <section className="landing-preview-panel landing-preview-description">
+              <h3>Описание</h3>
+              <div>
+                {description.map((paragraph, index) => (
+                  <p key={`${index}-${paragraph.slice(0, 24)}`}>{paragraph}</p>
+                ))}
+              </div>
+            </section>
+          )}
+
           {content.specifications?.length > 0 && (
             <section className="landing-preview-panel landing-preview-specs">
               <h3>Характеристики</h3>
@@ -87,8 +122,6 @@ export default function LandingPreview({ product, content, warnings, publication
               </dl>
             </section>
           )}
-
-          {product.description && <section className="landing-preview-panel landing-preview-description"><h3>Описание</h3><p>{product.description}</p></section>}
 
           {content.faq?.length > 0 && (
             <section className="landing-preview-panel landing-preview-faq">
