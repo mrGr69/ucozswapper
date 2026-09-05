@@ -694,7 +694,9 @@ app.post("/api/publish", async (request, reply) => {
     });
     return {
       ...publication,
-      message: "Лендинг опубликован на uCoz.",
+      message: publication.verificationStatus === "pending"
+        ? "Лендинг записан по FTP. uCoz ещё обновляет публичный URL — страница может открыться в течение 1–2 минут."
+        : "Лендинг опубликован на uCoz и доступен по публичному URL.",
       previewUrl: publication.url
     };
   } catch (error) {

@@ -166,12 +166,15 @@
 .landing-preview-benefits li { display: flex; gap: 8px; color: #475569; font-size: 11px; font-weight: 600; line-height: 1.45; }
 .landing-preview-benefits li span { display: grid; width: 18px; height: 18px; flex: 0 0 18px; place-items: center; background: rgba(209, 250, 229, .9); color: #047857; }
 
-.landing-preview-specs dl { display: grid; gap: 1px; margin: 0; }
+.landing-preview-benefits,
+.landing-preview-description,
+.landing-preview-specs { grid-column: 1 / -1; }
+.landing-preview-specs dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px 16px; margin: 0; }
 .landing-preview-specs dl div { display: grid; grid-template-columns: minmax(80px, .8fr) minmax(0, 1.2fr); gap: 8px; padding: 6px 0; }
 .landing-preview-specs dt { color: #94a3b8; font-size: 9px; font-weight: 800; text-transform: uppercase; }
 .landing-preview-specs dd { min-width: 0; margin: 0; color: #334155; font-size: 10px; font-weight: 700; overflow-wrap: anywhere; }
-.landing-preview-description { grid-column: 1 / -1; }
-.landing-preview-description p { max-height: 150px; margin: 0; overflow-y: auto; color: #475569; font-size: 11px; line-height: 1.55; white-space: pre-line; scrollbar-width: thin; }
+.landing-preview-description > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 18px; max-height: 180px; overflow-y: auto; scrollbar-width: thin; }
+.landing-preview-description p { margin: 0; color: #475569; font-size: 11px; line-height: 1.6; }
 .landing-preview-faq { grid-column: 1 / -1; }
 .landing-preview-faq details { padding: 7px 0; background: transparent; }
 .landing-preview-faq summary { color: #334155; cursor: pointer; font-size: 11px; font-weight: 800; }
@@ -195,4 +198,6 @@
   .landing-preview-details { grid-template-columns: 1fr; }
   .landing-preview-description,
   .landing-preview-faq { grid-column: auto; }
+  .landing-preview-description > div,
+  .landing-preview-specs dl { grid-template-columns: 1fr; }
 }
