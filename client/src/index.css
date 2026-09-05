@@ -1,0 +1,273 @@
+@import "tailwindcss";
+@source "../node_modules/preline/dist/*.js";
+@import "../node_modules/preline/variants.css";
+@plugin "@tailwindcss/forms";
+@import "../node_modules/preline/css/themes/theme.css";
+
+@font-face {
+  font-family: "MV Skifer";
+  src: url("./assets/fonts/MV-SKIFER.otf") format("opentype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+:root {
+  font-family: "Ubuntu", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-weight: 300;
+  color: #0f172a;
+  background: #fbfbff;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+  overflow-x: hidden;
+  background:
+    radial-gradient(circle at 16% -8%, rgba(253, 224, 71, .28), transparent 34rem),
+    radial-gradient(circle at 88% 8%, rgba(216, 180, 254, .31), transparent 38rem),
+    radial-gradient(circle at 52% 56%, rgba(191, 219, 254, .23), transparent 40rem),
+    linear-gradient(145deg, #fffef9 0%, #faf9ff 48%, #f6fbff 100%);
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button:not(:disabled),
+[role="button"]:not(:disabled) {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+.ucoz-app *,
+.ucoz-app *::before,
+.ucoz-app *::after {
+  border-width: 0 !important;
+  border-radius: 0 !important;
+}
+
+.ucoz-app .animate-spin {
+  border-style: solid !important;
+  border-width: 2px !important;
+  border-radius: 9999px !important;
+}
+
+.ucoz-app .preview-loading .animate-spin {
+  border-width: 3px !important;
+}
+
+.font-display {
+  font-family: "MV Skifer", "Ubuntu", sans-serif;
+  font-weight: 400 !important;
+}
+
+.product-preview-stage {
+  position: fixed;
+  z-index: 30;
+  inset: 88px 0 130px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.product-preview-stack {
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+}
+
+.product-active .sun-orb,
+.product-active .sun-grid {
+  display: none;
+}
+
+.product-active *,
+.product-active *::before,
+.product-active *::after {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.product-active .wb-pulse::before,
+.product-active .wb-pulse::after {
+  display: none;
+  animation: none;
+}
+
+.sun-grid {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: .22;
+  background-image:
+    linear-gradient(rgba(124, 58, 237, .08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(124, 58, 237, .08) 1px, transparent 1px);
+  background-size: 64px 64px;
+  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, .65), transparent 72%);
+}
+
+.sun-orb {
+  position: fixed;
+  z-index: 0;
+  border: 1px solid rgba(255, 255, 255, .85);
+  border-radius: 999px;
+  pointer-events: none;
+  filter: blur(.2px);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, .9), 0 35px 90px rgba(124, 58, 237, .12);
+  animation: sunny-float 12s ease-in-out infinite;
+}
+
+.sun-orb-one {
+  top: 8rem;
+  left: -7rem;
+  width: 20rem;
+  height: 20rem;
+  background: linear-gradient(145deg, rgba(255, 255, 255, .52), rgba(253, 230, 138, .28));
+}
+
+.sun-orb-two {
+  top: 22rem;
+  right: -8rem;
+  width: 24rem;
+  height: 24rem;
+  background: linear-gradient(145deg, rgba(255, 255, 255, .55), rgba(196, 181, 253, .26));
+  animation-delay: -5s;
+}
+
+.sunny-gradient-text {
+  color: transparent;
+  background: linear-gradient(105deg, #7c3aed 8%, #a855f7 50%, #ec4899 92%);
+  background-clip: text;
+  -webkit-background-clip: text;
+}
+
+.sunny-step-card,
+.sunny-glass-panel,
+.sunny-action-bar {
+  border: 1px solid rgba(255, 255, 255, .88);
+  background: linear-gradient(145deg, rgba(255, 255, 255, .66), rgba(255, 255, 255, .38));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .95),
+    0 20px 60px rgba(79, 70, 229, .08);
+  backdrop-filter: blur(24px) saturate(135%);
+  -webkit-backdrop-filter: blur(24px) saturate(135%);
+}
+
+.sunny-step-card {
+  min-height: 110px;
+  padding: 18px;
+  border-radius: 25px;
+  transition: transform .25s ease, box-shadow .25s ease, border-color .25s ease;
+}
+
+.sunny-step-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(196, 181, 253, .82);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 1), 0 24px 65px rgba(124, 58, 237, .12);
+}
+
+.sunny-glass-panel {
+  position: relative;
+  overflow: hidden;
+  border-radius: 32px;
+}
+
+.sunny-glass-panel::before {
+  position: absolute;
+  inset: -45% auto auto -8%;
+  width: 45%;
+  aspect-ratio: 1;
+  content: "";
+  border-radius: 999px;
+  pointer-events: none;
+  background: radial-gradient(circle, rgba(253, 224, 71, .24), transparent 68%);
+}
+
+.sunny-glass-panel > * {
+  position: relative;
+}
+
+.sunny-action-bar {
+  border-radius: 25px;
+}
+
+.wb-pulse::before,
+.wb-pulse::after {
+  position: absolute;
+  inset: -1px;
+  content: "";
+  border-radius: inherit;
+  box-shadow: 0 0 0 1px rgba(168, 85, 247, .44);
+  animation: wb-ripple 2.25s ease-out infinite;
+}
+
+.wb-pulse::after {
+  animation-delay: 1.1s;
+}
+
+.history-fab::before {
+  position: absolute;
+  inset: 5px;
+  content: "";
+  border-radius: 17px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .72);
+  pointer-events: none;
+}
+
+.history-drawer {
+  animation: history-drawer-in .24s cubic-bezier(.2, .8, .2, 1) both;
+}
+
+@keyframes wb-ripple {
+  0% { opacity: .72; transform: scale(1); }
+  75%, 100% { opacity: 0; transform: scale(1.48); }
+}
+
+@keyframes sunny-float {
+  0%, 100% { transform: translate3d(0, 0, 0) rotate(0deg); }
+  50% { transform: translate3d(0, 18px, 0) rotate(3deg); }
+}
+
+@keyframes history-drawer-in {
+  from { opacity: 0; transform: translateX(28px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@media (max-width: 640px) {
+  .sun-grid { background-size: 42px 42px; }
+  .sun-orb-one { left: -11rem; }
+  .sun-orb-two { right: -15rem; }
+  .sunny-glass-panel { border-radius: 26px; }
+  .history-fab { right: .75rem !important; bottom: 12rem !important; }
+  .product-preview-stage { inset: 78px 0 220px; }
+}
+
+@media (min-width: 641px) and (max-width: 1280px) {
+  .history-fab { bottom: 8.75rem !important; }
+}
+
+@media (min-width: 641px) and (max-width: 1023px) {
+  .product-preview-stage { bottom: 206px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}
