@@ -60,6 +60,8 @@ export function getMarketplaceMeta(value) {
 export function isFallbackProductTitle(title, marketplaceValue) {
   if (!title) return true;
   const normalizedTitle = String(title).trim().toLowerCase();
+  if (/интернет.?магазин wildberries/i.test(normalizedTitle)) return true;
+  if (/^(avito|авито)(?:\s|[—\-–:|]|$)/i.test(normalizedTitle) || /объявления на (сайте )?авито|сайт объявлений/i.test(normalizedTitle)) return true;
   const marketplace = normalizeMarketplace(marketplaceValue);
   const fallbackTitles = [
     MARKETPLACE_META.unknown.defaultTitle,
@@ -104,4 +106,28 @@ export function getDefaultCtaText(product) {
 
 export function getMarketplaceLinkLabel(record) {
   return getMarketplaceMeta(record?.platform || record?.marketplace || detectMarketplaceFromUrl(record?.productUrl)).label;
+}
+
+export function upgradeDisplayImageUrl(imageUrl, product) {
+  const value = String(imageUrl || "").trim();
+  if (!value) return "";
+  const marketplace = normalizeMarketplace(product?.platform || product?.marketplace);
+  if (marketplace === "wb" || /wbbasket\.ru|wildberries/i.test(value)) {
+    return value.replace(/\/(?:c\d+x\d+|tm|square|hq|big)\//i, "/big/");
+  }
+  if (marketplace === "avito" || /avito\.st|avatars\.mds\.yandex\.net/i.test(value)) {
+    return value
+      .replace(/(\/get-avito\/[^/?#]+\/[^/?#]+)\/\d+x\d+/i, "$1/orig")
+      .replace(/\/\d{2,4}x\d{2,4}(?=\/)/g, "/1280x960")
+      .replace(/_(\d{2,4}x\d{2,4})(?=\.(?:jpe?g|png|webp|avif)\b|$)/i, "_1280x960");
+  }
+  return value;
+}
+
+export function thumbnailDisplayUrl(imageUrl, product) {
+  const upgraded = upgradeDisplayImageUrl(imageUrl, product);
+  if (normalizeMarketplace(product?.platform || product?.marketplace) === "wb") {
+    return upgraded.replace(/\/(?:c\d+x\d+|big|hq|square|tm)\//i, "/c246x328/");
+  }
+  return upgraded;
 }

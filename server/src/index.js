@@ -7,6 +7,7 @@ import dotenv from "dotenv";
 import { z } from "zod";
 import * as cheerio from "cheerio";
 import { fetchAvitoProductViaZenRows } from "./adapters/avito.js";
+import { upgradeWbImageUrl } from "./lib/imageQuality.js";
 import { createRandomLandingDesign, generateLandingWithNexus, getLlmRuntimeInfo, landingContentSchema } from "./handlers/llmhandler.js";
 import { renderLandingHtml } from "./handlers/landingrenderer.js";
 import { publishLandingToUcoz, publishLandingWithUserUapi } from "./handlers/ucozpublisher.js";
@@ -183,7 +184,7 @@ function parseWbHtml(html, productUrl, fetchedAt, sourceMode = "zenrows") {
   const productImages = [...html.matchAll(productImagePattern)]
     .map((match) => match[0].startsWith("//") ? `https:${match[0]}` : match[0])
     .filter((url) => productId && url.includes(`/${productId}/images/`));
-  const extractedImages = [...new Set([...images, ...productImages])].slice(0, 12);
+  const extractedImages = [...new Set([...images, ...productImages].map(normalizeWbImageUrl))].slice(0, 12);
   const warnings = [];
 
   if (!productTitle) warnings.push("Название не найдено в публичной разметке карточки.");
@@ -310,13 +311,35 @@ function normalizeExtractedCharacteristics(value) {
 }
 
 function normalizeWbImageUrl(imageUrl) {
-  return imageUrl.replace(/\/(?:c\d+x\d+|big|hq|square|tm)\//i, "/c516x688/");
+  return upgradeWbImageUrl(imageUrl);
 }
 
-function normalizeWbPrice(value) {
-  const text = cleanText(value).replace(/\u00a0/g, " ");
-  const match = text.match(/\d[\d\s]*(?:[.,]\d+)?\s*₽/);
-  return cleanText(match?.[0] || text);
+function formatWbPrice(amount, fraction) {
+  const normalizedAmount = cleanText(String(amount || "").replace(/\s+/g, " "));
+  if (!normalizedAmount) return "";
+  return `${normalizedAmount}${fraction ? `,${fraction}` : ""} ₽`;
+}
+
+function normalizeWbPrice(value, { allowBareNumber = false } = {}) {
+  const text = cleanText(value).replace(/\u00a0|&nbsp;/gi, " ");
+  if (!text) return "";
+  const buyMatch = text.match(/купить\s+за\s+([\d\s]+(?:[.,]\d{1,2})?)\s*₽/i);
+  if (buyMatch) {
+    const [amount, fraction] = buyMatch[1].split(/[.,]/);
+    return formatWbPrice(amount, fraction);
+  }
+  const withCurrency = text.match(/(?<![\d.])(\d{1,3}(?:\s\d{3})+|\d{2,7})(?:[.,](\d{1,2}))?\s*₽/);
+  if (withCurrency) return formatWbPrice(withCurrency[1], withCurrency[2]);
+  if (allowBareNumber && /^\d[\d\s]{0,12}(?:[.,]\d{1,2})?$/.test(text)) {
+    const [amount, fraction] = text.split(/[.,]/);
+    return formatWbPrice(amount, fraction);
+  }
+  return "";
+}
+
+function isGenericWbTitle(title) {
+  const text = cleanText(title);
+  return !text || /^товар с /i.test(text) || /интернет.?магазин wildberries/i.test(text);
 }
 
 function parseWbExtractedJson(payload, productUrl, fetchedAt) {
@@ -333,8 +356,19 @@ function parseWbExtractedJson(payload, productUrl, fetchedAt) {
     imageUrl.includes("/images/") && (!productId || productId === "unknown" || imageUrl.includes(`/${productId}/images/`))
   );
   const images = [...new Set(productImages.length ? productImages : imageCandidates.filter((imageUrl) => imageUrl.includes("/images/")))];
-  const title = cleanText(extracted?.title);
-  const priceWithoutWallet = normalizeWbPrice(extracted?.price_without_wallet ?? extracted?.price);
+  const extractedTitle = [extracted?.title].flatMap(flattenExtractedValue).find((value) => !isGenericWbTitle(value)) || "";
+  const ogTitle = firstNonEmpty(extracted?.og_title);
+  const summaryMatch = cleanText(ogTitle).match(/^(.+?)\s+\d{7,9}\s+купить\s+за\s+/i);
+  const title = extractedTitle || cleanText(summaryMatch?.[1]);
+  const priceWithoutWallet = [
+    normalizeWbPrice(extracted?.price_without_wallet),
+    normalizeWbPrice(extracted?.price),
+    normalizeWbPrice(extracted?.price_wallet),
+    normalizeWbPrice(extracted?.price_meta, { allowBareNumber: true }),
+    normalizeWbPrice(extracted?.item_price, { allowBareNumber: true }),
+    normalizeWbPrice(extracted?.og_title),
+    normalizeWbPrice(extracted?.meta_description)
+  ].find(Boolean) || "";
   const description = normalizeExtractedDescription(
     extracted?.description,
     extracted?.description_paragraphs,
@@ -363,7 +397,7 @@ function parseWbExtractedJson(payload, productUrl, fetchedAt) {
     productUrl,
     fetchedAt,
     sourceMode: "zenrows",
-    sourceStatus: title && priceWithoutWallet ? "fetched" : "partial",
+    sourceStatus: title && !isGenericWbTitle(title) && images.length && productId !== "unknown" ? "fetched" : "partial",
     warnings
   };
 }
@@ -381,9 +415,14 @@ async function fetchWbProductViaZenRows(productUrl) {
       { wait: 3000 }
     ]),
     css_extractor: JSON.stringify({
-      title: "h2.productTitle--jKvWV",
-      price: "span.priceBlockPrice--Pwqvm",
-      price_without_wallet: "span.priceBlockPrice--Pwqvm",
+      title: "h2.productTitle--jKvWV, h1[class*='productTitle']",
+      price: "[class*='priceBlockPrice'], ins.price-block__final-price",
+      price_without_wallet: "[class*='priceBlockPrice'], ins.price-block__final-price",
+      price_wallet: "[class*='walletPrice']",
+      price_meta: "meta[property='product:price:amount']@content",
+      item_price: "[itemprop='price']@content",
+      og_title: "meta[property='og:title']@content",
+      meta_description: "meta[name='description']@content",
       description: ".mo-drawer__paper .content--IOf3X p",
       description_paragraphs: ".mo-drawer__paper .content--IOf3X p",
       description_block: ".mo-drawer__paper .content--IOf3X",

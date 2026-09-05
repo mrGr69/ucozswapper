@@ -72,7 +72,6 @@ function validateProduct(product) {
   if (product.sourceMode !== "zenrows") errors.push("Источник данных не подтверждён ZenRows.");
   if (product.sourceStatus !== "fetched") errors.push(`ZenRows вернул статус «${product.sourceStatus || "unknown"}», а не подтверждённую карточку.`);
   if (!product.title || isFallbackProductTitle(product.title, marketplace)) errors.push("Не найдено название товара.");
-  if (!product.price && marketplace !== "avito") errors.push("Не найдена цена товара.");
   if (!product.description && marketplace !== "avito") errors.push("Не найдено описание товара.");
   if (!product.productId || product.productId === "unknown") errors.push("Не найден ID товара.");
   if (!Array.isArray(product.images) || product.images.length === 0) errors.push("Не найдены фотографии товара.");
@@ -133,14 +132,15 @@ export default function App() {
 
       setProduct(data.product);
       setStatus("success");
+      await generateLandingFromProduct(data.product);
     } catch (error) {
       setIssues({ errors: [error.message], warnings: [] });
       setStatus("error");
     }
   }
 
-  async function generateLanding() {
-    if (!product) return;
+  async function generateLandingFromProduct(currentProduct) {
+    if (!currentProduct) return;
     setLandingStatus("loading");
     setPublication(null);
     setPublishMessage("");
@@ -148,7 +148,7 @@ export default function App() {
       const generateResponse = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ product })
+        body: JSON.stringify({ product: currentProduct })
       });
       const generated = await generateResponse.json();
       if (!generateResponse.ok) throw new Error(generated.error || "Не удалось сгенерировать лендинг.");
@@ -159,6 +159,10 @@ export default function App() {
       setPublishMessage(error.message);
       setLandingStatus("error");
     }
+  }
+
+  async function generateLanding() {
+    await generateLandingFromProduct(product);
   }
 
   async function publishToDemoUcoz() {

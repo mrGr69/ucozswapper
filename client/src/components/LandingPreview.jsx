@@ -1,11 +1,11 @@
 import { Check, ChevronLeft, ChevronRight, ExternalLink, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
-import { getDefaultCtaText } from "../lib/marketplace";
+import { getDefaultCtaText, upgradeDisplayImageUrl } from "../lib/marketplace";
 import "./landing-preview.css";
 
 export default function LandingPreview({ product, content, warnings, publication, publishMessage }) {
-  const images = product.images || [];
-  const initialImage = content.hero?.image || images[0];
+  const images = (product.images || []).map((image) => upgradeDisplayImageUrl(image, product));
+  const initialImage = upgradeDisplayImageUrl(content.hero?.image, product) || images[0];
   const [activeIndex, setActiveIndex] = useState(Math.max(0, images.indexOf(initialImage)));
   const preset = content.design?.preset || "spotlight";
   const slider = content.design?.slider || "rail";
