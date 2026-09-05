@@ -1,5 +1,6 @@
 import { Check, ChevronLeft, ChevronRight, ExternalLink, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
+import { getDefaultCtaText } from "../lib/marketplace";
 import "./landing-preview.css";
 
 export default function LandingPreview({ product, content, warnings, publication, publishMessage }) {
@@ -56,7 +57,7 @@ export default function LandingPreview({ product, content, warnings, publication
             <h1>{content.hero?.headline}</h1>
             <p className="landing-preview-subheadline">{content.hero?.subheadline}</p>
             <a href={content.cta?.url || product.productUrl} target="_blank" rel="noreferrer" className="landing-preview-cta">
-              {content.cta?.text || "Купить на WB"} <ExternalLink size={15} />
+              {content.cta?.text || getDefaultCtaText(product)} <ExternalLink size={15} />
             </a>
           </div>
         </section>

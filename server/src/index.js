@@ -6,6 +6,7 @@ import fastifyStatic from "@fastify/static";
 import dotenv from "dotenv";
 import { z } from "zod";
 import * as cheerio from "cheerio";
+import { fetchAvitoProductViaZenRows } from "./adapters/avito.js";
 import { createRandomLandingDesign, generateLandingWithNexus, getLlmRuntimeInfo, landingContentSchema } from "./handlers/llmhandler.js";
 import { renderLandingHtml } from "./handlers/landingrenderer.js";
 import { publishLandingToUcoz, publishLandingWithUserUapi } from "./handlers/ucozpublisher.js";
@@ -18,6 +19,7 @@ const clientDist = path.join(__dirname, "../../client/dist");
 const app = Fastify({ logger: true, trustProxy: true });
 const productCache = new Map();
 const productCacheTtlMs = 15 * 60 * 1000;
+const supportedMarketplaceSchema = z.enum(["wb", "avito"]);
 
 await app.register(cors, { origin: true });
 await app.register(fastifyStatic, {
@@ -27,7 +29,7 @@ await app.register(fastifyStatic, {
 
 const productInputSchema = z.object({
   productUrl: z.string().trim().url().max(2000),
-  marketplace: z.enum(["wb"]).default("wb")
+  marketplace: supportedMarketplaceSchema.default("wb")
 });
 
 const productDtoSchema = z.object({
@@ -49,7 +51,7 @@ const productDtoSchema = z.object({
 const generateInputSchema = z.object({
   product: productDtoSchema.optional(),
   productUrl: z.string().trim().url().max(2000).optional(),
-  marketplace: z.enum(["wb"]).default("wb")
+  marketplace: supportedMarketplaceSchema.default("wb")
 }).refine((value) => value.product || value.productUrl, { message: "Нужен product или productUrl." });
 
 const publishInputSchema = z.object({
@@ -70,6 +72,7 @@ function isSecureCredentialRequest(request) {
 function detectMarketplace(productUrl, requestedMarketplace) {
   if (requestedMarketplace) return requestedMarketplace;
   const host = new URL(productUrl).hostname.toLowerCase();
+  if (host.includes("avito")) return "avito";
   if (host.includes("ozon")) return "ozon";
   return "wb";
 }
@@ -82,13 +85,19 @@ function assertSupportedProductUrl(productUrl, marketplace) {
     throw new Error("Для режима WB нужна ссылка с домена wildberries.ru.");
   }
 
+  if (marketplace === "avito" && hostname !== "avito.ru" && !hostname.endsWith(".avito.ru")) {
+    throw new Error("Для режима Avito нужна ссылка с домена avito.ru.");
+  }
+
   if (marketplace === "ozon" && hostname !== "ozon.ru" && !hostname.endsWith(".ozon.ru")) {
     throw new Error("Для режима Ozon нужна ссылка с домена ozon.ru.");
   }
 }
 
 function extractProductId(productUrl) {
-  const match = productUrl.match(/\/catalog\/(\d+)/i) || productUrl.match(/\/product\/[^/?]+-(\d+)/i);
+  const match = productUrl.match(/\/catalog\/(\d+)/i)
+    || productUrl.match(/\/product\/[^/?]+-(\d+)/i)
+    || productUrl.match(/_(\d+)(?:[/?#]|$)/);
   return match?.[1] || null;
 }
 
@@ -431,10 +440,14 @@ async function fetchWbProductViaZenRows(productUrl) {
   return product;
 }
 
+function isFallbackProductTitle(title) {
+  return !title || /^Товар с /i.test(title);
+}
+
 function createMockProduct(productUrl, requestedMarketplace) {
   const marketplace = detectMarketplace(productUrl, requestedMarketplace);
   return {
-    platform: marketplace === "ozon" ? "Ozon" : "WB",
+    platform: marketplace === "avito" ? "Avito" : marketplace === "ozon" ? "Ozon" : "WB",
     productId: "demo-123456",
     title: "Демо-товар для лендинга",
     description: "Тестовое описание товара для проверки AI pipeline.",
@@ -459,7 +472,7 @@ function createMockProduct(productUrl, requestedMarketplace) {
 function productQualityScore(product) {
   if (!product) return 0;
   return [
-    product.title && product.title !== "Товар с Wildberries" ? 3 : 0,
+    product.title && !isFallbackProductTitle(product.title) ? 3 : 0,
     product.price ? 2 : 0,
     product.description ? 3 : 0,
     Array.isArray(product.images) && product.images.length ? 2 : 0,
@@ -470,9 +483,9 @@ function productQualityScore(product) {
 function isCacheableProduct(product) {
   return product?.sourceStatus === "fetched"
     && product.title
-    && product.title !== "Товар с Wildberries"
-    && Boolean(product.price)
-    && Boolean(product.description)
+    && !isFallbackProductTitle(product.title)
+    && (product.platform === "Avito" || Boolean(product.price))
+    && (product.platform === "Avito" || Boolean(product.description))
     && Array.isArray(product.images)
     && product.images.length > 0;
 }
@@ -491,17 +504,23 @@ async function parseProduct(productUrl, requestedMarketplace) {
   }
   if (cached) productCache.delete(cacheKey);
 
-  if (marketplace === "wb") {
+  const fetchers = {
+    wb: fetchWbProductViaZenRows,
+    avito: fetchAvitoProductViaZenRows
+  };
+  const fetchProduct = fetchers[marketplace];
+
+  if (fetchProduct) {
     try {
       if (!process.env.ZENROWS_API_KEY) throw new Error("ZENROWS_API_KEY не настроен на backend.");
-      let product = await fetchWbProductViaZenRows(productUrl);
+      let product = await fetchProduct(productUrl);
       const productNeedsRetry = !product.title
-        || product.title === "Товар с Wildberries"
-        || !product.price
-        || !product.description
+        || isFallbackProductTitle(product.title)
+        || (!product.price && marketplace === "wb")
+        || (!product.description && marketplace === "wb")
         || !product.images.length;
       if (productNeedsRetry && process.env.ZENROWS_EMPTY_RETRY !== "false") {
-        const retriedProduct = await fetchWbProductViaZenRows(productUrl);
+        const retriedProduct = await fetchProduct(productUrl);
         if (productQualityScore(retriedProduct) >= productQualityScore(product)) product = retriedProduct;
       }
       if (isCacheableProduct(product)) productCache.set(cacheKey, { product, savedAt: Date.now() });
