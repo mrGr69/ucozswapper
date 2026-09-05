@@ -1,30 +1,41 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ArrowRight,
   Check,
   Clock3,
+  Eye,
   ExternalLink,
   Link2,
+  Moon,
+  Send,
   ShieldCheck,
   Sparkles,
-  WandSparkles
+  Sun,
+  WandSparkles,
+  Zap
 } from "lucide-react";
 import ProductCardPreview from "./components/ProductCardPreview";
 import LandingPreview from "./components/LandingPreview";
 import LocalAccount from "./components/LocalAccount";
+import UapiPublishModal from "./components/UapiPublishModal";
 import ZenRowsErrorModal from "./components/ZenRowsErrorModal";
 import { loadOrCreateLocalAccount, recordSuccessfulPublication } from "./lib/localAccount";
+import ucozSwapperLogo from "./assets/uCozSwapper-logotype.svg";
+
+function loadInitialTheme() {
+  const savedTheme = window.localStorage.getItem("ucoz-swapper-theme");
+  if (savedTheme === "light" || savedTheme === "dark") return savedTheme;
+  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
 
 function BrandMark() {
   return (
-    <a href="#top" className="group inline-flex items-center gap-3 focus:outline-hidden" aria-label="UcozSwapper — на главную">
-      <span className="grid size-11 place-items-center rounded-[17px] bg-white/65 text-base font-black text-violet-700 shadow-[0_12px_35px_rgba(79,70,229,.12)] backdrop-blur-xl transition group-hover:-translate-y-0.5 group-hover:shadow-[0_16px_42px_rgba(79,70,229,.18)]">
-        US
-      </span>
-      <span className="min-w-0">
-        <span className="block text-[15px] font-extrabold tracking-[-.025em] text-slate-950">UcozSwapper</span>
-        <span className="block text-[11px] font-medium text-slate-500">Карточка в лендинг за минуту</span>
-      </span>
+    <a href="#top" className="group inline-flex items-center focus:outline-hidden" aria-label="UcozSwapper — карточка в лендинг за минуту">
+      <img
+        src={ucozSwapperLogo}
+        alt="UcozSwapper"
+        className="brand-logo h-12 w-auto transition duration-300 group-hover:-translate-y-0.5 sm:h-14"
+      />
     </a>
   );
 }
@@ -68,7 +79,15 @@ export default function App() {
   const [landingStatus, setLandingStatus] = useState("idle");
   const [publishMessage, setPublishMessage] = useState("");
   const [status, setStatus] = useState("idle");
+  const [previewMode, setPreviewMode] = useState("product");
   const [issues, setIssues] = useState({ errors: [], warnings: [] });
+  const [theme, setTheme] = useState(loadInitialTheme);
+  const [isUapiOpen, setIsUapiOpen] = useState(false);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    window.localStorage.setItem("ucoz-swapper-theme", theme);
+  }, [theme]);
 
   async function inspectProduct(event) {
     event.preventDefault();
@@ -77,6 +96,7 @@ export default function App() {
     setPublication(null);
     setPublishMessage("");
     setLandingStatus("idle");
+    setPreviewMode("product");
     setIssues({ errors: [], warnings: [] });
     setStatus("loading");
 
@@ -104,7 +124,7 @@ export default function App() {
     }
   }
 
-  async function generateAndPublish() {
+  async function generateLanding() {
     if (!product) return;
     setLandingStatus("loading");
     setPublication(null);
@@ -118,21 +138,7 @@ export default function App() {
       const generated = await generateResponse.json();
       if (!generateResponse.ok) throw new Error(generated.error || "Не удалось сгенерировать лендинг.");
       setLanding(generated);
-      setLandingStatus("publishing");
-
-      const publishResponse = await fetch("/api/publish", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ product, content: generated.content })
-      });
-      const published = await publishResponse.json();
-      if (!publishResponse.ok) throw new Error(published.error || "Не удалось опубликовать лендинг на uCoz.");
-      if (!published.published || !published.url) throw new Error("uCoz не подтвердил публичный URL лендинга.");
-
-      const completedPublication = { ...published, model: generated.model };
-      setPublication(completedPublication);
-      setAccount((current) => recordSuccessfulPublication(current, completedPublication, product));
-      setPublishMessage(published.message || "Лендинг опубликован на uCoz.");
+      setPreviewMode("landing");
       setLandingStatus("success");
     } catch (error) {
       setPublishMessage(error.message);
@@ -140,18 +146,61 @@ export default function App() {
     }
   }
 
+  async function publishToDemoUcoz() {
+    if (!product || !landing?.content) return;
+    setLandingStatus("publishing");
+    setPublishMessage("");
+    try {
+      const publishResponse = await fetch("/api/publish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ product, content: landing.content })
+      });
+      const published = await publishResponse.json();
+      if (!publishResponse.ok) throw new Error(published.error || "Не удалось опубликовать лендинг на uCoz.");
+      if (!published.published || !published.url) throw new Error("uCoz не подтвердил публичный URL лендинга.");
+
+      const completedPublication = { ...published, model: landing.model };
+      setPublication(completedPublication);
+      setAccount((current) => recordSuccessfulPublication(current, completedPublication, product));
+      setPublishMessage(published.message || "Лендинг опубликован на demo-uCoz.");
+      setLandingStatus("success");
+    } catch (error) {
+      setPublishMessage(error.message);
+      setLandingStatus("error");
+    }
+  }
+
+  async function publishWithUserUapi({ siteUrl, apiKey }) {
+    if (!product || !landing?.content) throw new Error("Сначала сгенерируйте лендинг.");
+    const response = await fetch("/api/publish/uapi", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ product, content: landing.content, siteUrl, apiKey })
+    });
+    const published = await response.json();
+    if (!response.ok) throw new Error(published.error || "uAPI не смог создать страницу.");
+    const completedPublication = { ...published, model: landing.model };
+    setPublication(completedPublication);
+    setAccount((current) => recordSuccessfulPublication(current, completedPublication, product));
+    setPublishMessage(published.message || "Страница создана через uAPI.");
+    return completedPublication;
+  }
+
   const isBusy = status === "loading";
   const isLandingBusy = landingStatus === "loading" || landingStatus === "publishing";
 
   return (
-    <main id="top" className={`ucoz-app relative min-h-screen overflow-hidden pb-48 text-slate-950 sm:pb-40 ${product || isBusy ? "product-active" : ""}`}>
-      <div className="sun-orb sun-orb-one" aria-hidden="true" />
-      <div className="sun-orb sun-orb-two" aria-hidden="true" />
+    <main id="top" className={`ucoz-app theme-${theme} relative min-h-screen overflow-hidden pb-48 text-slate-950 sm:pb-40 ${product || isBusy ? "product-active" : ""}`}>
       <div className="sun-grid" aria-hidden="true" />
 
       <div className="relative z-10 mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <header className="py-5 sm:py-7">
+        <header className="flex items-center justify-between gap-4 py-5 sm:py-7">
           <BrandMark />
+          <button type="button" onClick={() => setTheme((current) => current === "dark" ? "light" : "dark")} className="theme-toggle" aria-label={theme === "dark" ? "Включить светлую тему" : "Включить тёмную тему"} title={theme === "dark" ? "Светлая тема" : "Тёмная тема"}>
+            {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+            <span>{theme === "dark" ? "Light" : "Dark"}</span>
+          </button>
         </header>
 
         {!product && !isBusy && <section className="mx-auto max-w-5xl pb-9 pt-10 text-center sm:pb-12 sm:pt-16">
@@ -163,7 +212,7 @@ export default function App() {
             Получите персональный лендинг за <span className="sunny-gradient-text">1 минуту</span>
           </h1>
           <p className="font-display mx-auto mt-6 max-w-2xl text-base leading-7 text-slate-600 sm:text-lg">
-            Всего два шага: вы даёте нам карточку Wildberries, а мы возвращаем готовый светлый лендинг с сильным CTA.
+            Всего два шага: вы даёте нам карточку Wildberries, а мы возвращаем готовый адаптивный лендинг с сильным CTA.
           </p>
 
           <div className="mx-auto mt-9 grid max-w-3xl gap-3 text-left sm:grid-cols-[1fr_auto_1fr] sm:items-center">
@@ -192,16 +241,17 @@ export default function App() {
         {product && (
           <section id="product-preview" className="product-preview-stage">
             <div className="product-preview-stack">
-              <ProductCardPreview product={product} />
-              {landing && <LandingPreview product={product} content={landing.content} aiMode={landing.mode} aiModel={landing.model} warnings={landing.warnings} publication={publication} publishMessage={publishMessage} />}
+              {previewMode === "landing" && landing
+                ? <LandingPreview product={product} content={landing.content} warnings={landing.warnings} publication={publication} publishMessage={publishMessage} />
+                : <ProductCardPreview product={product} />}
             </div>
           </section>
         )}
       </div>
 
       <div className="pointer-events-none fixed inset-x-0 bottom-0 z-[65] p-3 sm:p-4">
-        <section className="bottom-composer pointer-events-auto mx-auto max-w-5xl rounded-[27px] bg-white/72 p-2.5 shadow-[0_20px_70px_rgba(72,45,118,.19)] backdrop-blur-2xl sm:p-3">
-          <form onSubmit={inspectProduct} className="grid gap-2.5 sm:grid-cols-[minmax(0,1fr)_auto] lg:grid-cols-[minmax(0,1fr)_auto_auto]">
+        <section className="bottom-composer pointer-events-auto mx-auto max-w-6xl rounded-[27px] bg-white/72 p-2 shadow-[0_20px_70px_rgba(72,45,118,.19)] backdrop-blur-2xl sm:p-2.5">
+          <form onSubmit={inspectProduct} className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
             <div className="relative min-w-0">
               <label htmlFor="product-url" className="sr-only">Ссылка на карточку товара Wildberries</label>
               <input
@@ -213,20 +263,42 @@ export default function App() {
                 inputMode="url"
                 autoComplete="url"
                 placeholder="Вставьте ссылку Wildberries…"
-                className="block min-h-13 w-full rounded-[19px] bg-white/68 py-3 ps-4 pe-16 text-sm font-semibold text-slate-900 shadow-[inset_0_1px_0_rgba(255,255,255,.9)] outline-none transition placeholder:text-slate-400 focus:ring-4 focus:ring-violet-100"
+                className="block min-h-11 w-full rounded-[19px] bg-white/68 py-2.5 ps-4 pe-14 text-sm font-semibold text-slate-900 shadow-[inset_0_1px_0_rgba(255,255,255,.9)] outline-none transition placeholder:text-slate-400 focus:ring-4 focus:ring-violet-100"
               />
-              <span className="wb-pulse absolute end-2 top-1/2 grid size-10 -translate-y-1/2 place-items-center rounded-[15px] bg-gradient-to-br from-fuchsia-500 via-violet-600 to-indigo-600 text-xs font-black lowercase text-white shadow-[0_8px_22px_rgba(124,58,237,.25)]" aria-label="Wildberries">wb</span>
+              <span className="wb-pulse absolute end-1.5 top-1/2 grid size-9 -translate-y-1/2 place-items-center rounded-[15px] bg-gradient-to-br from-fuchsia-500 via-violet-600 to-indigo-600 text-[11px] font-black lowercase text-white shadow-[0_8px_22px_rgba(124,58,237,.25)]" aria-label="Wildberries">wb</span>
             </div>
 
-            <button disabled={isBusy} type="submit" className="inline-flex min-h-13 items-center justify-center gap-x-2 rounded-[19px] bg-violet-600 px-5 text-sm font-extrabold text-white shadow-[0_10px_28px_rgba(124,58,237,.24)] transition hover:-translate-y-0.5 hover:bg-violet-700 focus:outline-hidden focus:ring-4 focus:ring-violet-200 disabled:pointer-events-none disabled:opacity-60">
-              {isBusy ? <><span className="size-4 animate-spin rounded-full border-2 border-white/40 border-t-white" /> Анализируем…</> : <>Preview <ArrowRight size={16} /></>}
-            </button>
-
-            {product && (
-              <button type="button" onClick={generateAndPublish} disabled={isLandingBusy} className="inline-flex min-h-13 items-center justify-center gap-x-2 rounded-[19px] bg-slate-950 px-5 text-sm font-extrabold text-white shadow-[0_10px_28px_rgba(15,23,42,.16)] transition hover:-translate-y-0.5 hover:bg-violet-700 focus:outline-hidden focus:ring-4 focus:ring-violet-200 disabled:pointer-events-none disabled:opacity-60 sm:col-span-2 lg:col-span-1">
-                {landingStatus === "loading" ? <><span className="size-4 animate-spin rounded-full border-2 border-white/40 border-t-white" /> Gemini…</> : landingStatus === "publishing" ? <><Clock3 size={16} /> uCoz…</> : <><WandSparkles size={16} /> Создать landing</>}
+            <div className="dock-action-group flex flex-wrap items-center gap-1 p-1">
+              <button disabled={isBusy} type="submit" className="dock-action dock-action-primary inline-flex min-h-9 items-center justify-center gap-x-1.5 bg-violet-600 px-3.5 text-xs font-extrabold text-white transition hover:bg-violet-700 focus:outline-hidden focus:ring-2 focus:ring-violet-200 disabled:pointer-events-none disabled:opacity-60">
+                {isBusy ? <><span className="size-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" /> Анализируем…</> : <><Zap size={14} fill="currentColor" /> Создать лендинг</>}
               </button>
-            )}
+
+              {product && (
+                <button type="button" onClick={generateLanding} disabled={isLandingBusy} className="dock-action inline-flex min-h-9 items-center justify-center gap-x-1.5 bg-slate-950 px-3.5 text-xs font-extrabold text-white transition hover:bg-violet-700 focus:outline-hidden focus:ring-2 focus:ring-violet-200 disabled:pointer-events-none disabled:opacity-60">
+                  {landingStatus === "loading" ? <><span className="size-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" /> Gemini…</> : <><WandSparkles size={14} /> {landing ? "Новый вариант" : "Сгенерировать"}</>}
+                </button>
+              )}
+
+              {landing && (
+                <>
+                  <button type="button" onClick={publishToDemoUcoz} disabled={isLandingBusy} className="dock-action inline-flex min-h-9 items-center justify-center gap-x-1.5 bg-violet-600 px-3.5 text-xs font-extrabold text-white transition hover:bg-violet-700 focus:outline-hidden focus:ring-2 focus:ring-violet-200 disabled:pointer-events-none disabled:opacity-60">
+                    {landingStatus === "publishing" ? <><Clock3 size={14} /> uCoz…</> : <><Send size={14} /> Demo uCoz</>}
+                  </button>
+                  <button type="button" onClick={() => setIsUapiOpen(true)} className="dock-action dock-action-uapi inline-flex min-h-9 items-center justify-center gap-x-1.5 px-3.5 text-xs font-extrabold transition focus:outline-hidden focus:ring-2 focus:ring-violet-200">
+                    <Send size={14} /> Свой uAPI
+                  </button>
+                </>
+              )}
+
+              <div className="dock-view-toggle flex min-h-9 items-center bg-slate-100/70 p-0.5" role="group" aria-label="Режим предпросмотра">
+                <button type="button" onClick={() => setPreviewMode("product")} disabled={!product} className={`dock-toggle inline-flex min-h-8 items-center gap-1.5 px-2.5 text-[11px] font-bold transition ${previewMode === "product" && product ? "is-active" : ""}`} aria-pressed={previewMode === "product"}>
+                  <Eye size={13} /> Карточка
+                </button>
+                <button type="button" onClick={() => setPreviewMode("landing")} disabled={!landing} title={landing ? "Показать лендинг" : "Сначала сгенерируйте лендинг"} className={`dock-toggle inline-flex min-h-8 items-center gap-1.5 px-2.5 text-[11px] font-bold transition ${previewMode === "landing" && landing ? "is-active" : ""}`} aria-pressed={previewMode === "landing"}>
+                  <Sparkles size={13} /> Лендинг{!landing && <span className="dock-toggle-placeholder">—</span>}
+                </button>
+              </div>
+            </div>
           </form>
 
           <div className="mt-2 flex min-h-7 flex-wrap items-center gap-x-4 gap-y-1 px-2 text-[11px] font-semibold text-slate-500">
@@ -240,6 +312,7 @@ export default function App() {
       </div>
 
       <LocalAccount account={account} />
+      {isUapiOpen && <UapiPublishModal onClose={() => setIsUapiOpen(false)} onPublish={publishWithUserUapi} />}
       {status === "error" && <ZenRowsErrorModal errors={issues.errors} warnings={issues.warnings} onClose={() => setStatus("idle")} />}
     </main>
   );

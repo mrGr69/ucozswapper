@@ -1,12 +1,46 @@
+import { randomInt } from "node:crypto";
 import { z } from "zod";
 
+const landingPresets = ["spotlight", "editorial", "spec-driven", "red_dark", "green_dark", "toxic", "midnight"];
+const landingAccents = ["violet", "electric-blue", "emerald", "coral"];
+const landingHeroLayouts = ["media-left", "media-right"];
+const landingSliders = ["rail", "cards", "cinematic"];
+
+function randomItem(values) {
+  return values[randomInt(values.length)];
+}
+
+export function createRandomLandingDesign() {
+  const preset = randomItem(landingPresets);
+  const darkPresetAccents = {
+    red_dark: "coral",
+    green_dark: "emerald",
+    toxic: "emerald",
+    midnight: "electric-blue"
+  };
+  return {
+    preset,
+    accent: darkPresetAccents[preset] || randomItem(landingAccents),
+    heroLayout: randomItem(landingHeroLayouts),
+    slider: randomItem(landingSliders)
+  };
+}
+
 export const landingContentSchema = z.object({
+  design: z.object({
+    preset: z.enum(["spotlight", "editorial", "spec-driven", "red_dark", "green_dark", "toxic", "midnight"]),
+    accent: z.enum(["violet", "electric-blue", "emerald", "coral"]),
+    heroLayout: z.enum(["media-left", "media-right"]),
+    slider: z.enum(["rail", "cards", "cinematic"])
+  }),
   seo: z.object({
     title: z.string().min(1).max(70),
     description: z.string().min(1).max(180),
-    slug: z.string().min(1).max(80).regex(/^[a-z0-9-]+$/)
+    slug: z.string().min(1).max(80).regex(/^[a-z0-9-]+$/),
+    keywords: z.array(z.string().min(1).max(48)).min(3).max(8)
   }),
   hero: z.object({
+    eyebrow: z.string().min(1).max(60),
     headline: z.string().min(1).max(120),
     subheadline: z.string().min(1).max(240),
     image: z.string().url().nullable()
@@ -22,10 +56,13 @@ export const landingContentSchema = z.object({
   })).max(6),
   cta: z.object({
     text: z.string().min(1).max(60),
-    url: z.string().url()
+    url: z.string().url(),
+    supportingText: z.string().min(1).max(120)
   }),
   warnings: z.array(z.string().max(240)).max(10).default([])
 });
+
+const modelLandingContentSchema = landingContentSchema.omit({ design: true });
 
 const landingJsonSchema = {
   type: "object",
@@ -35,18 +72,20 @@ const landingJsonSchema = {
     seo: {
       type: "object",
       additionalProperties: false,
-      required: ["title", "description", "slug"],
+      required: ["title", "description", "slug", "keywords"],
       properties: {
         title: { type: "string", maxLength: 70 },
         description: { type: "string", maxLength: 180 },
-        slug: { type: "string", maxLength: 80, pattern: "^[a-z0-9-]+$" }
+        slug: { type: "string", maxLength: 80, pattern: "^[a-z0-9-]+$" },
+        keywords: { type: "array", items: { type: "string", maxLength: 48 }, minItems: 3, maxItems: 8 }
       }
     },
     hero: {
       type: "object",
       additionalProperties: false,
-      required: ["headline", "subheadline", "image"],
+      required: ["eyebrow", "headline", "subheadline", "image"],
       properties: {
+        eyebrow: { type: "string", maxLength: 60 },
         headline: { type: "string", maxLength: 120 },
         subheadline: { type: "string", maxLength: 240 },
         image: { type: ["string", "null"] }
@@ -82,10 +121,11 @@ const landingJsonSchema = {
     cta: {
       type: "object",
       additionalProperties: false,
-      required: ["text", "url"],
+      required: ["text", "url", "supportingText"],
       properties: {
         text: { type: "string", maxLength: 60 },
-        url: { type: "string" }
+        url: { type: "string" },
+        supportingText: { type: "string", maxLength: 120 }
       }
     },
     warnings: { type: "array", items: { type: "string", maxLength: 240 }, maxItems: 10 }
@@ -94,11 +134,16 @@ const landingJsonSchema = {
 
 function buildLandingPrompt(product) {
   return [
-    "Создай контент продающего одностраничного лендинга по подтверждённой карточке товара WB.",
+    "Спроектируй контент конверсионного одностраничного лендинга по подтверждённой карточке товара WB.",
     "Пиши на русском языке и верни только JSON по заданной схеме.",
+    "Цель: быстро объяснить ценность товара, удержать внимание и привести пользователя к честному CTA перехода на исходную карточку.",
     "Не выдумывай характеристики, цифры, скидки, доставку, гарантию, рейтинг, наличие и комплектацию.",
     "Используй только факты из product. Если факта нет — не добавляй его, а кратко укажи это в warnings.",
-    "Сформулируй 3–6 конкретных преимуществ без неподтверждённых обещаний.",
+    "Сформулируй 3–6 конкретных выгод на языке покупателя, но без неподтверждённых обещаний и искусственного дефицита.",
+    "Заголовок должен быть конкретным и сильным, подзаголовок — раскрывать кому и зачем подходит товар.",
+    "Не возвращай CSS, HTML или инструкции дизайна: внешний шаблон, цвет, hero-композицию и слайдер случайно выбирает backend.",
+    "SEO-текст должен естественно включать название, тип товара и ключевые характеристики без переспама. Верни 3–8 релевантных keywords.",
+    "CTA сформулируй как ясное действие. supportingText должен снимать сомнение и честно сообщать, что покупка оформляется на маркетплейсе.",
     "CTA должен вести строго на product.productUrl, hero.image — на одно из product.images или null.",
     "SEO title — до 70 символов, description — до 180 символов, slug — латиница, цифры и дефисы.",
     `product=${JSON.stringify(product)}`
@@ -140,7 +185,7 @@ export async function generateLandingWithNexus(product) {
       messages: [
         {
           role: "system",
-          content: "Ты создаёшь достоверный контент лендинга из ProductDTO. Отвечай только валидным JSON и строго соблюдай схему."
+          content: "Ты senior CRO-копирайтер и SEO-архитектор товарных лендингов. Создавай убедительную, кликабельную, но строго достоверную структуру только из ProductDTO. Не придумывай факты. Отвечай исключительно валидным JSON по переданной строгой схеме."
         },
         { role: "user", content: buildLandingPrompt(product) }
       ],
@@ -195,19 +240,24 @@ export async function generateLandingWithNexus(product) {
     rawContent.cta.url = product.productUrl;
   }
 
-  const validated = landingContentSchema.safeParse(rawContent);
+  const validated = modelLandingContentSchema.safeParse(rawContent);
   if (!validated.success) {
     const issue = validated.error.issues[0];
     throw new Error(`Ответ Gemini не прошёл схему LandingContent: ${issue?.path?.join(".") || "root"} — ${issue?.message || "validation error"}`);
   }
 
+  const content = landingContentSchema.parse({
+    design: createRandomLandingDesign(),
+    ...validated.data
+  });
+
   return {
-    content: validated.data,
+    content,
     mode: "nexus",
     provider: "Nexus Hub",
     model: payload.model || model,
     requestId: payload.id || null,
     usage: payload.usage || null,
-    warnings: validated.data.warnings
+    warnings: content.warnings
   };
 }

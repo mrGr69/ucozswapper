@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "node --watch src/index.js",
-    "start": "node src/index.js"
+    "start": "node src/index.js",
+    "smoke:generate": "node scripts/smoke-generate.mjs",
+    "smoke:uapi-fallback": "node scripts/smoke-uapi-fallback.mjs"
   },
   "dependencies": {
     "@fastify/cors": "^11.0.1",

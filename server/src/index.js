@@ -6,15 +6,16 @@ import fastifyStatic from "@fastify/static";
 import dotenv from "dotenv";
 import { z } from "zod";
 import * as cheerio from "cheerio";
-import { generateLandingWithNexus, getLlmRuntimeInfo, landingContentSchema } from "./handlers/llmhandler.js";
-import { publishLandingToUcoz } from "./handlers/ucozpublisher.js";
+import { createRandomLandingDesign, generateLandingWithNexus, getLlmRuntimeInfo, landingContentSchema } from "./handlers/llmhandler.js";
+import { renderLandingHtml } from "./handlers/landingrenderer.js";
+import { publishLandingToUcoz, publishLandingWithUserUapi } from "./handlers/ucozpublisher.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.join(__dirname, "../.env") });
 const clientDist = path.join(__dirname, "../../client/dist");
 
-const app = Fastify({ logger: true });
+const app = Fastify({ logger: true, trustProxy: true });
 const productCache = new Map();
 const productCacheTtlMs = 15 * 60 * 1000;
 
@@ -55,6 +56,16 @@ const publishInputSchema = z.object({
   content: landingContentSchema,
   product: productDtoSchema
 });
+
+const userUapiPublishInputSchema = publishInputSchema.extend({
+  siteUrl: z.string().trim().url().max(500),
+  apiKey: z.string().trim().min(24).max(256).regex(/^sk_live_[A-Za-z0-9_-]+$/, "Некорректный формат uAPI key.")
+});
+
+function isSecureCredentialRequest(request) {
+  if (process.env.NODE_ENV !== "production") return true;
+  return request.protocol === "https";
+}
 
 function detectMarketplace(productUrl, requestedMarketplace) {
   if (requestedMarketplace) return requestedMarketplace;
@@ -445,28 +456,55 @@ function createMockProduct(productUrl, requestedMarketplace) {
   };
 }
 
+function productQualityScore(product) {
+  if (!product) return 0;
+  return [
+    product.title && product.title !== "Товар с Wildberries" ? 3 : 0,
+    product.price ? 2 : 0,
+    product.description ? 3 : 0,
+    Array.isArray(product.images) && product.images.length ? 2 : 0,
+    Array.isArray(product.characteristics) && product.characteristics.length ? 1 : 0
+  ].reduce((sum, value) => sum + value, 0);
+}
+
+function isCacheableProduct(product) {
+  return product?.sourceStatus === "fetched"
+    && product.title
+    && product.title !== "Товар с Wildberries"
+    && Boolean(product.price)
+    && Boolean(product.description)
+    && Array.isArray(product.images)
+    && product.images.length > 0;
+}
+
 async function parseProduct(productUrl, requestedMarketplace) {
   const marketplace = detectMarketplace(productUrl, requestedMarketplace);
   assertSupportedProductUrl(productUrl, marketplace);
 
-  const cacheKey = `${marketplace}:${productUrl}`;
+  const cacheKey = `${marketplace}:${extractProductId(productUrl) || productUrl}`;
   const cached = productCache.get(cacheKey);
-  if (cached && Date.now() - cached.savedAt < productCacheTtlMs) {
+  if (cached && Date.now() - cached.savedAt < productCacheTtlMs && isCacheableProduct(cached.product)) {
     return {
       ...cached.product,
       warnings: [...new Set([...(cached.product.warnings || []), "Использована подтверждённая карточка из локального кэша."])]
     };
   }
+  if (cached) productCache.delete(cacheKey);
 
   if (marketplace === "wb") {
     try {
       if (!process.env.ZENROWS_API_KEY) throw new Error("ZENROWS_API_KEY не настроен на backend.");
       let product = await fetchWbProductViaZenRows(productUrl);
-      const extractorIsEmpty = !product.title || product.title === "Товар с Wildberries" || !product.price || !product.images.length;
-      if (product.sourceStatus !== "fetched" && extractorIsEmpty && process.env.ZENROWS_EMPTY_RETRY !== "false") {
-        product = await fetchWbProductViaZenRows(productUrl);
+      const productNeedsRetry = !product.title
+        || product.title === "Товар с Wildberries"
+        || !product.price
+        || !product.description
+        || !product.images.length;
+      if (productNeedsRetry && process.env.ZENROWS_EMPTY_RETRY !== "false") {
+        const retriedProduct = await fetchWbProductViaZenRows(productUrl);
+        if (productQualityScore(retriedProduct) >= productQualityScore(product)) product = retriedProduct;
       }
-      if (product.sourceStatus === "fetched") productCache.set(cacheKey, { product, savedAt: Date.now() });
+      if (isCacheableProduct(product)) productCache.set(cacheKey, { product, savedAt: Date.now() });
       return product;
     } catch (error) {
       if (process.env.DEMO_FALLBACK === "true") {
@@ -488,12 +526,15 @@ function buildMockLanding(product) {
     .slice(0, 3)
     .map(({ label, value }) => `${label}: ${value}`);
   return {
+    design: createRandomLandingDesign(),
     seo: {
       title: `${product.title} — заказать на ${platformName}`,
       description: `Узнайте больше о товаре «${product.title}» и перейдите к покупке на ${platformName}.`,
-      slug: `product-${product.productId}`.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-|-$/g, "").slice(0, 80) || "product"
+      slug: `product-${product.productId}`.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-|-$/g, "").slice(0, 80) || "product",
+      keywords: [product.title, product.platform, "купить товар"].slice(0, 8)
     },
     hero: {
+      eyebrow: `${platformName} · выбор покупателя`,
       headline: product.title,
       subheadline: product.description || "Короткий продающий лендинг, собранный из данных карточки маркетплейса.",
       image: product.images[0] || null
@@ -512,51 +553,11 @@ function buildMockLanding(product) {
     ],
     cta: {
       text: `Купить на ${platformName}`,
-      url: product.productUrl
+      url: product.productUrl,
+      supportingText: `Вы перейдёте на ${platformName}, где можно проверить актуальные условия и оформить заказ.`
     },
     warnings: product.warnings || []
   };
-}
-
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-function safeHttpUrl(value, fallback = "#") {
-  try {
-    const url = new URL(value);
-    return ["http:", "https:"].includes(url.protocol) ? url.toString() : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function renderLandingHtml(product, content) {
-  const imageUrl = safeHttpUrl(content.hero.image || product.images[0] || "", "");
-  const productUrl = safeHttpUrl(content.cta.url, safeHttpUrl(product.productUrl));
-  const benefits = content.benefits.map((item) => `<li>${escapeHtml(item)}</li>`).join("");
-  const specifications = content.specifications.map(({ label, value }) => `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(value)}</td></tr>`).join("");
-  const faq = content.faq.map(({ question, answer }) => `<details><summary>${escapeHtml(question)}</summary><p>${escapeHtml(answer)}</p></details>`).join("");
-  const gallery = product.images.slice(0, 6).map((image) => `<img src="${escapeHtml(safeHttpUrl(image))}" alt="${escapeHtml(product.title)}">`).join("");
-
-  return `<!doctype html>
-<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${escapeHtml(content.seo.title)}</title><meta name="description" content="${escapeHtml(content.seo.description)}">
-<style>
-:root{font-family:Inter,Arial,sans-serif;color:#17191d;background:#f6f2eb}*{box-sizing:border-box}body{margin:0}.page{max-width:1120px;margin:auto;padding:24px}.hero{display:grid;grid-template-columns:1fr 1fr;gap:40px;align-items:center;padding:64px 0}.hero img{width:100%;max-height:520px;object-fit:contain;border-radius:28px;background:#fff}.eyebrow{color:#6d7077;font-size:12px;font-weight:800;letter-spacing:.14em;text-transform:uppercase}.hero h1{font-size:clamp(36px,6vw,72px);line-height:.98;margin:16px 0}.hero p{font-size:20px;line-height:1.5;color:#6d7077}.cta{display:inline-block;margin-top:18px;padding:16px 24px;border-radius:14px;background:#2f6fed;color:#fff;text-decoration:none;font-weight:800}.section{padding:28px 0}.section h2{font-size:32px}.benefits{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;padding:0;list-style:none}.benefits li,.card{padding:22px;border:1px solid #e4ddd2;border-radius:20px;background:#fffdf9}.specs{width:100%;border-collapse:collapse;background:#fffdf9;border-radius:20px;overflow:hidden}.specs th,.specs td{text-align:left;padding:14px 18px;border-bottom:1px solid #eee7dc}.specs th{color:#777a80;width:40%}details{padding:18px 0;border-bottom:1px solid #ded8cf}summary{cursor:pointer;font-weight:800}details p{color:#6d7077;line-height:1.6}.gallery{display:flex;gap:10px;overflow:auto}.gallery img{width:110px;height:110px;object-fit:cover;border-radius:14px;background:#fff}@media(max-width:760px){.page{padding:16px}.hero{grid-template-columns:1fr;padding:36px 0}.benefits{grid-template-columns:1fr}.hero h1{font-size:44px}}
-</style></head><body><main class="page">
-<section class="hero"><div>${imageUrl ? `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(product.title)}">` : ""}</div><div><span class="eyebrow">${escapeHtml(product.platform)} · ${escapeHtml(product.productId)}</span><h1>${escapeHtml(content.hero.headline)}</h1><p>${escapeHtml(content.hero.subheadline)}</p><strong>${escapeHtml(product.priceWithoutWallet || product.price || "Цена уточняется")}</strong><br><a class="cta" href="${escapeHtml(productUrl)}" rel="nofollow noopener">${escapeHtml(content.cta.text)}</a></div></section>
-<section class="section"><h2>Почему стоит обратить внимание</h2><ul class="benefits">${benefits}</ul></section>
-${specifications ? `<section class="section"><h2>Характеристики</h2><table class="specs"><tbody>${specifications}</tbody></table></section>` : ""}
-<section class="section"><h2>О товаре</h2><div class="card"><p>${escapeHtml(product.description || content.hero.subheadline)}</p></div></section>
-${faq ? `<section class="section"><h2>Вопросы и ответы</h2>${faq}</section>` : ""}
-${gallery ? `<section class="section"><div class="gallery">${gallery}</div></section>` : ""}
-</main></body></html>`;
 }
 
 app.get("/api/health", async () => ({
@@ -641,6 +642,32 @@ app.post("/api/publish", async (request, reply) => {
   } catch (error) {
     request.log.error({ err: error }, "uCoz publication failed");
     return reply.code(502).send({ error: error.message || "Не удалось опубликовать лендинг на uCoz." });
+  }
+});
+
+app.post("/api/publish/uapi", async (request, reply) => {
+  reply.header("Cache-Control", "no-store");
+  if (!isSecureCredentialRequest(request)) {
+    return reply.code(400).send({ error: "Передача uAPI key разрешена только через HTTPS." });
+  }
+  const parsed = userUapiPublishInputSchema.safeParse(request.body);
+  if (!parsed.success) {
+    return reply.code(400).send({ error: parsed.error.issues[0]?.message || "Некорректные данные uAPI-публикации." });
+  }
+  const { product, content, siteUrl, apiKey } = parsed.data;
+  const html = renderLandingHtml(product, content);
+  try {
+    const publication = await publishLandingWithUserUapi({ product, content, html, siteUrl, apiKey });
+    return {
+      ...publication,
+      message: publication.customUrlDisabled
+        ? "Страница создана через uAPI с системным URL: индивидуальные URL отключены в настройках сайта."
+        : "Новая редактируемая страница создана через uAPI.",
+      previewUrl: publication.url
+    };
+  } catch (error) {
+    request.log.error({ message: error.message }, "user uAPI publication failed");
+    return reply.code(502).send({ error: error.message || "Не удалось создать страницу через uAPI." });
   }
 });
 

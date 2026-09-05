@@ -1,26 +1,16 @@
 # UcozSwapper — технический запуск
 
-## 1. Что установить
+## Требования
 
-Обязательно:
+- Git 2.x.
+- Node.js `^20.19.0` или `>=22.12.0`; рекомендуется актуальная LTS 22+.
+- npm из комплекта Node.js.
 
-- Git 2.x;
-- Node.js, совместимый с Vite 7: `^20.19.0` или `>=22.12.0`;
-- npm, который устанавливается вместе с Node.js.
+Python, глобальный Vite/Fastify/ucoz-mcp и GitHub CLI не требуются. Sharp ставится как dev-зависимость frontend.
 
-Рекомендация для команды: актуальная LTS-ветка Node.js 22+.
+## Установка
 
-Не требуется:
-
-- Python;
-- глобальная установка Vite, React, Fastify или `ucoz-mcp`;
-- GitHub CLI `gh` — он нужен только для удобного создания репозитория/PR из терминала.
-
-В текущей рабочей среде проверены Node.js `v26.8.1`, npm `11.19.0` и Git `2.55.0.windows.5`.
-
-## 2. Установка проекта
-
-Команды выполняются из корня репозитория в CMD:
+Из корня проекта в CMD:
 
 ```cmd
 npm ci
@@ -29,13 +19,9 @@ npm --prefix server ci
 copy server\.env.example server\.env
 ```
 
-У проекта три lock-файла: корневой, frontend и backend. Поэтому зависимости устанавливаются отдельно для каждого уровня.
+## Конфигурация
 
-## 3. Переменные окружения
-
-Секреты хранятся только в `server\.env`. Файл уже исключён через `.gitignore`.
-
-Основные переменные:
+Секреты находятся только в `server\.env`, который исключён из Git:
 
 ```dotenv
 PORT=3001
@@ -44,7 +30,6 @@ DEMO_FALLBACK=true
 
 ZENROWS_API_KEY=
 ZENROWS_CAPTURE_XHR=false
-ZENROWS_EMPTY_RETRY=true
 
 NEXUS_API_KEY=
 NEXUS_API_BASE_URL=https://api.nexus-hub.tech/v1
@@ -59,20 +44,9 @@ UCOZ_FTP_USER=
 UCOZ_FTP_PASS=
 ```
 
-Назначение:
+Ключ пользователя для `POST /api/publish/uapi` в `.env` не нужен: UI отправляет его один раз в body, сервер использует его для одного Pages-запроса и не сохраняет.
 
-- `ZENROWS_API_KEY` — реальный сбор карточки WB.
-- `NEXUS_API_KEY` — реальная генерация LandingContent.
-- `DEMO_FALLBACK` и `AI_DEMO_FALLBACK` — разрешение резервных demo/mock данных.
-- `UCOZ_PUBLISH_MODE=ftp` — standalone HTML через FTP.
-- `UCOZ_PUBLISH_MODE=pages` — создание страницы через Pages API; требует `UCOZ_API_TOKEN`.
-- `WB_API_TOKEN`, `OZON_CLIENT_ID`, `OZON_API_KEY` пока зарезервированы и в текущем MVP не используются.
-
-Перед Git-публикацией необходимо заменить все ключи, которые ранее передавались в чат или попадали на скриншоты.
-
-## 4. Локальная разработка
-
-Запустить frontend и backend одной командой:
+## Запуск
 
 ```cmd
 npm run dev
@@ -80,75 +54,51 @@ npm run dev
 
 - frontend: `http://127.0.0.1:5173`;
 - backend: `http://127.0.0.1:3001`;
-- запросы `/api/*` Vite проксирует на backend.
+- Vite проксирует `/api/*` на backend.
 
-Отдельный запуск:
+Отдельно:
 
 ```cmd
 npm run dev:client
 npm run dev:server
 ```
 
-## 5. Production-проверка
+## Проверки
 
 ```cmd
 npm run build
-npm start
-```
-
-`npm run build` создаёт `client\dist`. Fastify раздаёт эту сборку и API с одного процесса на порту `PORT`.
-
-Проверка backend:
-
-```cmd
+npm --prefix server run smoke:generate
 curl http://127.0.0.1:3001/api/health
 ```
 
+`smoke:generate` делает реальный Nexus/Gemini запрос и проверяет JSON, случайный preset и HTML gallery controls. Он расходует квоту LLM.
+
 Основные endpoints:
 
-- `GET /api/health` — конфигурация и состояние сервисов;
-- `POST /api/parse` — URL WB → `ProductDTO`;
-- `POST /api/generate` — `ProductDTO` → AI JSON + HTML preview;
-- `POST /api/publish` — валидированный контент → публичная uCoz-страница.
+- `GET /api/health` — состояние интеграций;
+- `POST /api/parse` — WB URL → ProductDTO;
+- `POST /api/generate` — ProductDTO → AI content + random design + HTML;
+- `POST /api/publish` — configured demo-uCoz;
+- `POST /api/publish/uapi` — новая Pages-страница на пользовательском uCoz.
 
-## 6. Проверки перед merge
+## uAPI publication
 
-Автоматический test runner пока не добавлен. Минимальный smoke-набор:
+Для пользовательского сайта нужны:
 
-1. `npm run build` завершается без ошибок.
-2. `/api/health` возвращает `ok: true`.
-3. Реальная WB-ссылка проходит `/api/parse` и показывает title, цену, ID, описание и фото.
-4. `/api/generate` возвращает `mode: live`, правильную модель и валидный JSON.
-5. `/api/publish` возвращает `published: true` и доступный публичный URL.
-6. CTA опубликованной страницы ведёт на исходную карточку WB.
-7. Операция появляется в локальной истории браузера.
+1. HTTPS URL сайта uCoz.
+2. uAPI key формата `sk_live_...` с минимальными правами на модуль Pages.
+3. Включённый модуль Pages на целевом сайте.
 
-## 7. uCoz MCP
+В production backend принимает ключи только по HTTPS с учётом reverse-proxy headers. Перед публичным запуском дополнительно включить rate limit, redaction чувствительных полей в логах и ограничение body size.
 
-Приложение не требует отдельной глобальной установки MCP: backend запускает `ucoz-mcp` из `server\node_modules` через MCP SDK.
+## Git hygiene
 
-Отдельное подключение MCP нужно только агенту/IDE для ручной диагностики uCoz. В Windows используется:
-
-```cmd
-cmd.exe /c npx -y ucoz-mcp@latest
-```
-
-Working directory — корень проекта. Переменные uCoz/FTP передаются окружением MCP-сервера.
-
-## 8. Git hygiene
-
-Не добавлять в Git:
-
-- `server\.env` и любые `.env` с ключами;
-- `node_modules`;
-- `client\dist`;
-- логи и временные файлы.
-
-Перед первым commit проверить:
+Перед первым commit:
 
 ```cmd
 git status --short
+git diff
 git diff --cached
 ```
 
-GitHub CLI является опциональным. Репозиторий можно создать через сайт GitHub и подключить обычным Git.
+Не коммитить `.env`, `node_modules`, `client\dist`, логи, дампы запросов и API keys. Все ключи, показанные в чатах или скриншотах, необходимо ротировать.
